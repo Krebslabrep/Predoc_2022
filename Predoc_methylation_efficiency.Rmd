@@ -1,0 +1,197 @@
+---
+title: "Methylation efficiencies of DNA methyltransferase enzymes"
+author: "Guido Barzaghi and Kasit Chatsirisupachai"
+date: '2022-11-29'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Single-molecule footprinting (SMF) is a technique to detect protein-DNA bindings at a single-molecule resolution. This technique leverages the ability of DNA methyltransferases, M.CviPI and M.SssI, to methylate cytosines at the accessible regions in the GpC and CpG context, respectively. In order to ensure an unbiased quantification of protein-DNA contacts, methylation efficiency should be uniform across all possible sequence contexts. In this workshop, we will examine M.CviPI and M.SssI methylation efficiencies in naked lambda DNA as a function of enzyme concentration and nucleotide contexts.
+
+
+## Dataset
+To footprint the DNA, Naked lambda DNA was treated with either M.CviPI (GpC) and M.SssI (CpG) in various concentrations (0, 0.2, 0.7, 0.75, 1.2, 1.5, 2, 3, 4, and 10 units/ug).
+The sequencing was performed on Illumina MiSeq.
+Raw sequencing files were aligned to the LambdaGenome using QuasR package.
+
+## Set working directory
+Here set working directory to your "Predoc_2022" folder.
+```{r}
+setwd("~/Desktop/KC_works/Projects/Predoc_2022/")
+```
+
+## Libraries
+```{r}
+suppressMessages(library(SingleMoleculeFootprinting))
+suppressMessages(library(BSgenome, quietly = TRUE))
+suppressMessages(library(tidyverse, quietly = TRUE))
+suppressMessages(library(GenomicRanges, quietly = TRUE))
+```
+
+## Qinput file
+Next, we look at the QuasR input file.
+QuasR is an R package that were used for alignment.
+```{r}
+### QuasR input file
+# A text file with BAM file names on the first column and sample names on the second column
+Qinput = "./aln/Qinput.txt"
+read.table(Qinput, header = 1)
+```
+
+## Load reference genome
+```{r}
+LambdaGenomeSeq = readDNAStringSet(filepath = "./genome/LambdaGenome2.fasta")
+names(LambdaGenomeSeq) = "J02459.1"
+LambdaGenomeSeq
+```
+
+## Alignment to the reference genome using QuasR
+```{r}
+QuasRprj = QuasR::qAlign(sampleFile = Qinput, genome = "./genome/LambdaGenome2.fasta", paired = 'fr', bisulfite = "undir")
+QuasRprj@aligner = "Rbowtie"
+
+QuasRprj
+```
+
+## Methylation Calling using QuasR
+```{r}
+Methylation = QuasR::qMeth(proj = QuasRprj, mode = "allC")
+
+head(Methylation)
+```
+
+## Processing methylation calling output
+
+### Separate GC and CG contexts
+```{r}
+GCs = FilterContextCytosines(MethGR = Methylation, genome = LambdaGenomeSeq, context = "GC")
+head(GCs, 3)
+
+CGs = FilterContextCytosines(MethGR = Methylation, genome = LambdaGenomeSeq, context = "CG")
+head(CGs, 3)
+```
+
+### Collapse reads from + and - strands
+```{r}
+GCs_collapsed = CollapseStrands(MethGR = GCs, context = "GC")
+head(GCs_collapsed, 3)
+
+CGs_collapsed = CollapseStrands(MethGR = CGs, context = "HCG")
+head(CGs_collapsed, 3)
+```
+
+### Filter cytosines by coverage (> 20 reads) and calculate methylation rate (methylated C / total C)
+```{r}
+GCs_filtered = CoverageFilter(MethGR = GCs_collapsed, thr = 20)
+head(GCs_filtered, 3)
+
+CGs_filtered = CoverageFilter(MethGR = CGs_collapsed, thr = 20)
+head(CGs_filtered, 3)
+```
+
+
+### Extend sequence length around (methylated) cytosines. 
+For the GC context, we add 2 nucleotides before C and 1 after C to get a NGCN pattern (C is at the third position). For CG context, we add 1 nucleotide before C and 2 after C to get a NCGN pattern (C is at the second position).
+```{r}
+start(GCs_filtered) = start(GCs_filtered) - 2
+end(GCs_filtered) = end(GCs_filtered) + 1
+start(CGs_filtered) = start(CGs_filtered) - 1
+end(CGs_filtered) = end(CGs_filtered) + 2
+
+AllCs = c(GCs_filtered, CGs_filtered)
+head(AllCs)
+```
+
+Get sequence contexts of every cytosine tested
+```{r}
+KMERS = getSeq(LambdaGenomeSeq, AllCs)
+head(KMERS, 3)
+tail(KMERS, 3)
+
+AllCs$Kmer_Context = KMERS
+```
+
+
+## Plotting the result
+
+### Data frame manipulations
+```{r}
+AllCs %>%
+  as_tibble() %>%
+  filter(GenomicContext == "CG") %>%
+  select(-seqnames, -end, -strand, -width) %>%
+  gather(Measure, Value, -Kmer_Context, -GenomicContext, -start) %>%
+  separate(Measure, into = c("Sample", "Measure"), sep = "_", remove = TRUE) %>%
+  spread(Measure, Value) %>%
+  filter(str_detect(Sample, "CG")) -> EDA_DF_CGs
+head(EDA_DF_CGs)
+
+AllCs %>%
+  as_tibble() %>%
+  filter(GenomicContext == "GC") %>%
+  select(-seqnames, -end, -strand, -width) %>%
+  gather(Measure, Value, -Kmer_Context, -GenomicContext, -start) %>%
+  separate(Measure, into = c("Sample", "Measure"), sep = "_", remove = TRUE) %>%
+  spread(Measure, Value)  %>%
+  filter(str_detect(Sample, "GC"))-> EDA_DF_GCs
+head(EDA_DF_GCs)
+```
+
+
+Prepare sample table (CG/GC and concentration)
+```{r}
+grep("Kmer_Context|GenomicContext", sort(unique(gsub("_Coverage$|_MethRate$", "", colnames(elementMetadata(AllCs))))), invert = TRUE, value = TRUE) %>%
+  data.frame() %>%
+  rename("Sample" = ".") %>%
+  mutate(Enzyme = gsub("[[:digit:]]|R", "", Sample), Conc = gsub("[[:alpha:]]", "", Sample)) %>%
+  mutate(Concentration = c(0,0.75,10,1.5,2,3,4,
+                           0,0.2,0.7,10,1.2,1.5,2,
+                           0.2,0.7,10,1.2,1.5,2)) %>%
+  mutate(Replicate = c(rep(1, 14), rep(2, 6))) %>%
+  select(-Conc) -> SamplesDict
+
+SamplesDict
+```
+
+
+### Prepare plotting dataframe
+```{r}
+plyr::join(rbind(EDA_DF_CGs, EDA_DF_GCs), SamplesDict) -> Plotting_DF
+Plotting_DF %>%
+  group_by(Kmer_Context, Enzyme, Concentration) %>%
+  summarise(Median_MethRate = median(MethRate, na.rm = TRUE)) %>%
+  ungroup() -> Summarised_Plotting_DF
+
+head(Summarised_Plotting_DF)
+```
+
+
+### Plot
+```{r}
+Summarised_Plotting_DF %>%
+  group_by(Kmer_Context, Enzyme) %>%
+  arrange((Concentration)) %>%
+  mutate(MethRate_seqDiff = c(Median_MethRate[1], diff(Median_MethRate))) %>%
+  ungroup() %>%
+  mutate(Concentration = factor(Concentration, levels = rev(unique(Concentration)))) %>%
+  ggplot() +
+  geom_bar(aes(reorder(Kmer_Context, Median_MethRate, na.rm=TRUE), MethRate_seqDiff*100, fill=Concentration), stat='identity', position = "stack") +
+  facet_wrap(~Enzyme, scales = "free_x", labeller = as_labeller(c("GC" = "M.CviPI", "CG" = "M.SssI"))) +
+  xlab("") +
+  ylab("Methylation (%)") +
+  theme_classic() +
+  labs(fill = "Concentration\n[U/\u03bcg]") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5), text = element_text(size = 15)) +
+  scale_y_continuous(breaks = c(0,100)) +
+  scale_fill_manual(values = rev(c(RColorBrewer::brewer.pal(name = "Reds", n=9), "black")))
+```
+
+
+
+
+
+
