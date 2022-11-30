@@ -1,7 +1,7 @@
 ---
 title: "Methylation efficiencies of DNA methyltransferase enzymes"
 author: "Guido Barzaghi and Kasit Chatsirisupachai"
-date: '2022-11-29'
+date: '2022-11-30'
 output: html_document
 ---
 
@@ -172,22 +172,7 @@ head(Summarised_Plotting_DF)
 
 ### Plot
 ```{r}
-Summarised_Plotting_DF %>%
-  group_by(Kmer_Context, Enzyme) %>%
-  arrange((Concentration)) %>%
-  mutate(MethRate_seqDiff = c(Median_MethRate[1], diff(Median_MethRate))) %>%
-  ungroup() %>%
-  mutate(Concentration = factor(Concentration, levels = rev(unique(Concentration)))) %>%
-  ggplot() +
-  geom_bar(aes(reorder(Kmer_Context, Median_MethRate, na.rm=TRUE), MethRate_seqDiff*100, fill=Concentration), stat='identity', position = "stack") +
-  facet_wrap(~Enzyme, scales = "free_x", labeller = as_labeller(c("GC" = "M.CviPI", "CG" = "M.SssI"))) +
-  xlab("") +
-  ylab("Methylation (%)") +
-  theme_classic() +
-  labs(fill = "Concentration\n[U/\u03bcg]") +
-  theme(axis.text.x = element_text(angle=90, vjust = 0.5), text = element_text(size = 15)) +
-  scale_y_continuous(breaks = c(0,100)) +
-  scale_fill_manual(values = rev(c(RColorBrewer::brewer.pal(name = "Reds", n=9), "black")))
+
 ```
 
 
