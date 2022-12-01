@@ -1,0 +1,71 @@
+---
+title: "Kleinendorst_et_al"
+author: "GuidoBarzaghi"
+date: "18/07/2021"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Fig.2
+```{r, fig.width=12}
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(tidyverse)
+
+# Get list of ChIP confirmed JASPAR TFBSs
+JASPAR_TFBSs = readRDS("mapped_jaspar_ChIP_bound_motifs.rds")
+JASPAR_TFBSs_ChIP = JASPAR_TFBSs[JASPAR_TFBSs$isBound == TRUE]
+
+UpstreamBins = GRanges(seqnames(JASPAR_TFBSs_ChIP), IRanges(start = end(JASPAR_TFBSs_ChIP) - (width(JASPAR_TFBSs_ChIP)/2) - 35, end = end(JASPAR_TFBSs_ChIP) - (width(JASPAR_TFBSs_ChIP)/2) - 25))
+UpstreamBinSeq = getSeq(BSgenome.Mmusculus.UCSC.mm10, UpstreamBins)
+TFBSBins = GRanges(seqnames(JASPAR_TFBSs_ChIP), IRanges(start = end(JASPAR_TFBSs_ChIP) - (width(JASPAR_TFBSs_ChIP)/2) - 15, end = end(JASPAR_TFBSs_ChIP) - (width(JASPAR_TFBSs_ChIP)/2) + 15))
+TFBSBinsSeq = getSeq(BSgenome.Mmusculus.UCSC.mm10, TFBSBins)
+DownstreamBins = GRanges(seqnames(JASPAR_TFBSs_ChIP), IRanges(start = end(JASPAR_TFBSs_ChIP) - (width(JASPAR_TFBSs_ChIP)/2) + 25, end = end(JASPAR_TFBSs_ChIP) - (width(JASPAR_TFBSs_ChIP)/2) + 35))
+DownstreamBinSeq = getSeq(BSgenome.Mmusculus.UCSC.mm10, DownstreamBins)
+
+Covered_SE = vcountPattern(pattern = "DGCHN", subject = UpstreamBinSeq, fixed = F) > 0 & 
+  vcountPattern(pattern = "DGCHN", subject = TFBSBinsSeq, fixed = F) > 0 &
+  vcountPattern(pattern = "DGCHN", subject = DownstreamBinSeq, fixed = F) > 0
+
+UpstreamCoverage = vcountPattern(pattern = "GC", subject = UpstreamBinSeq) > 0 | vcountPattern(pattern = "CG", subject = UpstreamBinSeq) > 0
+TFBSCoverage = vcountPattern(pattern = "GC", subject = TFBSBinsSeq) > 0 | vcountPattern(pattern = "CG", subject = TFBSBinsSeq) > 0
+DownstreamCoverage = vcountPattern(pattern = "GC", subject = DownstreamBinSeq) > 0 | vcountPattern(pattern = "CG", subject = DownstreamBinSeq) > 0
+Covered_DE = UpstreamCoverage & TFBSCoverage & DownstreamCoverage
+
+JASPAR_TFBSs_ChIP %>%
+  as_tibble() %>%
+  mutate(TFBS = names(JASPAR_TFBSs_ChIP)) %>%
+  mutate(Covered_SE = Covered_SE, Covered_DE = Covered_DE) %>%
+  select(TFBS, name, Covered_SE, Covered_DE) -> TFBS_coverage_DF
+
+# N.b.: because I only ask for TFBSs to contain AT LEAST one cytosine, overcounting GCGs has no consequence
+
+# TF-wise
+TFBS_coverage_DF %>%
+  group_by(name) %>%
+  summarise(Count = sum(Covered_SE)) %>%
+  mutate(ExpType = "SE SMF") -> SE_TFBSs
+TFBS_coverage_DF %>%
+  group_by(name) %>%
+  summarise(Count = sum(Covered_DE)) %>%
+  mutate(ExpType = "DE SMF") -> DE_TFBSs
+TFBS_coverage_DF %>%
+  group_by(name) %>%
+  summarise(Count = n()) %>%
+  mutate(ExpType = "Total") -> Tot_TFBSs
+
+rbind(SE_TFBSs, DE_TFBSs, Tot_TFBSs) %>%
+  spread(ExpType, Count) %>%
+  gather(ExpType, nrTFBSs, -name, -Total) %>%
+  mutate(perc = (nrTFBSs / Total)*100) %>%
+  select(-nrTFBSs) %>%
+  spread(ExpType, perc) %>%
+  ggplot() +
+  geom_point(aes(x=`DE SMF`, y=`SE SMF`, size=Total)) +
+  ggrepel::geom_label_repel(aes(x=`DE SMF`, y=`SE SMF`, label=name), force = 3, box.padding = 0.5, max.overlaps = 15) +
+  xlab("% TFBS covered with DE SMF") +
+  ylab("% TFBS covered with SE SMF") +
+  theme_classic()
+```
