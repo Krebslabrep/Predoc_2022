@@ -14,7 +14,7 @@ install.packages("devtools")
 # BiocManager and Bioconductor
 if (!require("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
-BiocManager::install(version = "3.16")
+BiocManager::install(version = "3.18")
 
 # QuasR
 BiocManager::install("QuasR")
